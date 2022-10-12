@@ -9,7 +9,7 @@ import ipaddress
 interface = "eth0"
 # option to poison router if sniffing of response is required
 poisonrouter = True
-attackportsecurity = False
+attackportsecurity = True
 debug = True
 
 myip = ni.ifaddresses(interface)[ni.AF_INET][0]["addr"]
