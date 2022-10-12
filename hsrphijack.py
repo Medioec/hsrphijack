@@ -63,8 +63,7 @@ def check_hsrp(packet):
         pkcopy = packet
     else:
         ethersrc = packet[Ether].src
-        # to improve on HSRPv2 detection, currently based on source mac address only and fails if standby group number changes
-        print(ethersrc)
+        # TODO to improve on HSRPv2 detection, currently based on source mac address only and fails if standby group number changes
         if ethersrc == "00:00:0c:9f:f0:01":
             print("HSRPv2 found")
             version = 2
