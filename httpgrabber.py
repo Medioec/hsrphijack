@@ -4,7 +4,7 @@ import os
 import re
 
 def sniffcreds():
-	sniff(prn=getcreds, filter="tcp", offline="test1.pcap")
+	sniff(prn=getcreds, filter="tcp")
 	
 def getcreds(pkt):
     method=b'POST'

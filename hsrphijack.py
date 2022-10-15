@@ -548,7 +548,7 @@ if __name__ == "__main__":
             fail_check.start()
             attack_hsrp = threading.Thread(target=send_hsrp, args=(pkcopy), daemon=True)
             attack_hsrp.start()
-            threading.Thread(target=httpgrabber.sniffcreds, daemon=True)
+            threading.Thread(target=httpgrabber.sniffcreds, daemon=True).start()
             user_input_handler()
     except KeyboardInterrupt:
         print("\nUser interrupt, exiting...\n")
