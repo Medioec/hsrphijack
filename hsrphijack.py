@@ -225,7 +225,7 @@ def send_initial_arp(type, pause=True):
     if version == 1:
         virtualIP = pkcopy[HSRP].virtualIP
         hellotime = pkcopy[HSRP].hellotime
-    else:
+    elif version == 2:
         ################
         virtualIP = "192.168.1.254"
         hellotime = 3
@@ -246,7 +246,7 @@ def start_arp_responder(packet):
     '''sniff and respond to arp request for HSRP virtual ip address from network'''
     if version == 1:
         virtualIP = packet[HSRP].virtualIP
-    else:
+    elif version == 2:
         ########################
         virtualIP = "192.168.1.254"
     if debug:
@@ -258,7 +258,7 @@ def arp_respond(packet):
     '''Called by sniff() in start_arp_responder to send unicast arp response to any request for HSRP virtual ip address, if matching rules in start_arp_responder'''
     if version == 1:
         virtualIP = pkcopy[HSRP].virtualIP
-    else:
+    elif version == 2:
         #####################
         virtualIP = "192.168.1.254"
     if attackportsecurity:
@@ -297,7 +297,7 @@ def arp_poison(packet):
             return
     if version == 1:
         virtualIP = pkcopy[HSRP].virtualIP
-    else:
+    elif version == 2:
         ###########################
         virtualIP = "192.168.1.254"
     try:
@@ -394,7 +394,7 @@ def simple_poison(interval):
 def start_subinterface():
     if version == 1:
         virtualIP = pkcopy[HSRP].virtualIP
-    else:
+    elif version == 2:
         #######################
         virtualIP = "192.168.1.254"
     if debug:
@@ -428,7 +428,7 @@ def delayed_failure_check():
     global hsrpfound
     if version == 1:
         hellotime = pkcopy[HSRP].hellotime
-    else:
+    elif version == 2:
         ####################
         hellotime = 3
     # will change hsrpfound to true if active hsrp found
