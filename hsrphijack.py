@@ -55,7 +55,7 @@ timekeeper = {}
 commandlist = []
 # for suppressing output
 suppress = False
-####################
+# not in use
 translations = {}
 portcounter = 0
 
@@ -111,12 +111,10 @@ def check_hsrp(packet):
         version = 1
         hsrpfound = True
         pkcopy = packet
-        ###################
-        #pkcopy[HSRP].virtualIP = "192.168.50.1"
-        #pkcopy[IP].src = "192.168.50.1"
     else:
         ethersrc = packet[Ether].src
-        # TODO to improve on HSRPv2 detection, currently based on source mac address only and fails if standby group number changes
+        # TODO to improve on HSRPv2 detection, currently based on source mac address only and fails if standby group number changes, someone work on this pls thanks
+        ########################################
         if ethersrc == "00:00:0c:9f:f0:01":
             if attackstarted:
                 srcip = packet[IP].src
@@ -127,9 +125,6 @@ def check_hsrp(packet):
             version = 2
             hsrpfound = True
             pkcopy = packet
-            ###################
-            #pkcopy[HSRP].virtualIP = "192.168.50.1"
-            #pkcopy[IP].src = "192.168.50.1"
 
 # make sure hsrp packet is valid
 def check_v1_fields(packet):
@@ -329,17 +324,16 @@ def arp_poison(packet):
             packet.show()
     return
 
-# [not working] sniff for packets to manually forward
+# [not working, not in use] sniff for packets to manually forward
 def start_forward_sniffer():
     if version == 1:
         virtualIP = pkcopy[HSRP].virtualIP
     else:
-        ########################
         virtualIP = "192.168.1.254"
     filterstring = f"ip and (tcp or udp) and dst host not ({virtualIP} or 0.0.0.0) and ether src host not {mymac} and not ip multicast"
     sniff(prn=manual_forwarding, filter=filterstring)
 
-# [not working] manually forward packets and replace source ip of packets exiting network with own ip, dest ip of packets entering network with remembered ip
+# [not working, not in use] manually forward packets and replace source ip of packets exiting network with own ip, dest ip of packets entering network with remembered ip
 def manual_forwarding(packet):
     global portcounter
     dst_address_string = packet[IP].dst
