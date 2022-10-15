@@ -395,15 +395,21 @@ def delayed_failure_check():
     # will change hsrpfound to true if active hsrp found
     check_fail = threading.Thread(target=find_hsrp, daemon=True)
     check_fail.start()
+    succeeded = 0
     while True:
         if time.time() - start > 10:
             if hsrpfound:
                 print("[WARN] Attack failed")
+                succeeded = 0
                 if terminateonfail:
                     cleanup()
                     os._exit(0)
-            elif not suppress:
-                print("[INFO] You are active router")
+            elif not suppress and debug:
+                print("[DEBUG] You are active router")
+                succeeded = 1
+            elif not suppress and succeeded == 0:
+                    print("[INFO] You are active router")
+                    succeeded = 1
             start += hellotime + 1
             hsrpfound = False
 
