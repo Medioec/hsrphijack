@@ -35,7 +35,7 @@ debug = False
 terminateonfail = False
 
 # for testing only, to set to false when running attack
-usepcapfile = True
+usepcapfile = False
 spoison = False
 nosubinter = False
 
