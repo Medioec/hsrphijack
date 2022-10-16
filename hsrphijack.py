@@ -17,7 +17,7 @@ interface = "eth0"
 poisonrouter = False
 
 # Default true. only poison for packets of interest, when poisonrouter set to True
-# see start_selective_poisoning() for rules
+# see arp_poison() for rules
 silentmode = True
 
 # Default true. option to force use of own mac address only when sending hsrp and arp packets
