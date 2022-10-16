@@ -4,7 +4,8 @@ import os
 import re
 
 def sniffcreds():
-	sniff(prn=getcreds, filter="tcp")
+    print("[INFO] Looking for login credentials")
+    sniff(prn=getcreds, filter="tcp")
 	
 def getcreds(pkt):
     method=b'POST'
